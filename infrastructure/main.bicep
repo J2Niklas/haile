@@ -91,7 +91,8 @@ resource gpt4oMiniDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
   }
 }
 
-// gpt-4o-realtime-preview skipped — quota shared with greeta2.
+// gpt-4o-realtime-preview is not deployed here by default.
+// Pass the realtimeEndpoint parameter if you have a separate resource with this model.
 // The app falls back to SSE mode automatically.
 
 // ==================== AZURE SPEECH SERVICES ====================
