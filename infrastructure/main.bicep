@@ -15,10 +15,15 @@ param environment string = 'dev'
 @secure()
 param appPin string = ''
 
+@description('Azure OpenAI endpoint for Realtime API (leave empty to skip realtime mode)')
+param realtimeEndpoint string = ''
+
+@description('Realtime API model deployment name')
+param realtimeDeployment string = 'gpt-4o-realtime-preview'
+
 // ==================== NAMING ====================
 
 var storageAccountName = 'st${baseName}${environment}'
-var appServicePlanName = 'asp-${baseName}-${environment}'
 var webAppName = 'app-${baseName}-${environment}'
 var appInsightsName = 'appi-${baseName}-${environment}'
 var openAIAccountName = 'openai-${baseName}-${environment}'
@@ -116,12 +121,19 @@ resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
   properties: {}
 }
 
-// ==================== APP SERVICE (backend - reuse greeta2 plan) ====================
+// ==================== APP SERVICE PLAN ====================
 
-// Reference the existing greeta2 App Service Plan (avoids B-series capacity issues)
-resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' existing = {
-  name: 'asp-greeta2-dev'
-  scope: resourceGroup('rg-greeta2')
+resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' = {
+  name: 'asp-${baseName}-${environment}'
+  location: location
+  kind: 'linux'
+  sku: {
+    name: 'B1'
+    tier: 'Basic'
+  }
+  properties: {
+    reserved: true // required for Linux
+  }
 }
 
 resource webApp 'Microsoft.Web/sites@2023-01-01' = {
@@ -145,11 +157,11 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
         }
         {
           name: 'AzureOpenAIRealtimeEndpoint'
-          value: 'https://openai-greeta2-dev.openai.azure.com/'
+          value: realtimeEndpoint
         }
         {
           name: 'AzureOpenAIRealtimeDeployment'
-          value: 'gpt-4o-realtime-preview'
+          value: realtimeDeployment
         }
         {
           name: 'AzureOpenAIApiVersion'

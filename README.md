@@ -116,3 +116,11 @@ All backend configuration is via environment variables (loaded from `local.setti
 - **System prompt**: Edit `backend/system_prompt.py`
 - **Avatar character**: Change avatar name/style in `frontend/speech.js` (`_connectAvatar`)
 - **Voice**: Change `VOICE_NAME` in `backend/ssml.py`
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+[MIT](LICENSE)

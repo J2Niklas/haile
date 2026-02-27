@@ -1,5 +1,5 @@
 # Deployment script for HAILE AI Avatar (PowerShell)
-# Same pattern as greeta2 - Bicep infra + zip deploy + SWA deploy
+# Bicep infra + zip deploy + SWA deploy
 
 # ==================== CONFIGURATION ====================
 
@@ -77,22 +77,6 @@ Write-Host "Web App URL:    $WEB_APP_URL" -ForegroundColor Green
 Write-Host "Static Web App: $SWA_NAME" -ForegroundColor Green
 Write-Host "Frontend URL:   $SWA_URL" -ForegroundColor Green
 Write-Host ""
-
-# ==================== GRANT RBAC ON GREETA2 OPENAI (for Realtime API) ====================
-Write-Host "Granting HAILE web app access to greeta2 OpenAI (for Realtime API)..." -ForegroundColor Yellow
-$webAppPrincipalId = az webapp identity show --resource-group $RESOURCE_GROUP --name $WEB_APP_NAME --query principalId --output tsv
-$greeta2OpenAIId = az cognitiveservices account show --name openai-greeta2-dev --resource-group rg-greeta2 --query id --output tsv 2>$null
-if ($greeta2OpenAIId) {
-    az role assignment create `
-        --assignee-object-id $webAppPrincipalId `
-        --assignee-principal-type ServicePrincipal `
-        --role "Cognitive Services OpenAI User" `
-        --scope $greeta2OpenAIId `
-        --output none 2>$null
-    Write-Host "Granted Cognitive Services OpenAI User on greeta2 OpenAI resource" -ForegroundColor Green
-} else {
-    Write-Host "WARNING: Could not find openai-greeta2-dev - Realtime API will not work in production" -ForegroundColor Yellow
-}
 
 # ==================== DEPLOY BACKEND (App Service zip deploy) ====================
 
