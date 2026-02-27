@@ -135,10 +135,6 @@ Write-Host "Setting API_BASE to: $API_URL" -ForegroundColor Yellow
 $FrontendTmp = "frontend-deploy"
 if (Test-Path $FrontendTmp) { Remove-Item $FrontendTmp -Recurse -Force }
 Copy-Item -Path frontend -Destination $FrontendTmp -Recurse
-# Include background image if not already in frontend/
-if ((Test-Path "background.png") -and -not (Test-Path "$FrontendTmp/background.png")) {
-    Copy-Item "background.png" "$FrontendTmp/background.png"
-}
 # Replace API_BASE in config.js (WS_BASE auto-computes from API_BASE)
 (Get-Content "$FrontendTmp/config.js") -replace "http://localhost:7071/api", $API_URL | Set-Content "$FrontendTmp/config.js"
 
