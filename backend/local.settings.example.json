@@ -1,0 +1,18 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureOpenAIEndpoint": "https://<your-openai-resource>.openai.azure.com/",
+    "AzureOpenAIChatDeployment": "gpt-4o-mini",
+    "AzureOpenAIRealtimeDeployment": "gpt-4o-realtime-preview",
+    "AzureSpeechEndpoint": "https://<your-speech-resource>.cognitiveservices.azure.com/",
+    "AzureSpeechRegion": "swedencentral",
+    "AppPin": "",
+    "CorsOrigins": "*"
+  },
+  "Host": {
+    "CORS": "*",
+    "CORSCredentials": false
+  }
+}

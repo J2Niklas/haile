@@ -1,0 +1,16 @@
+[project]
+name = "haile-backend"
+version = "1.0.0"
+description = "HAILE AI Avatar Backend"
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
