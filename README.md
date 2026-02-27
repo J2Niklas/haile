@@ -21,12 +21,63 @@ Realtime mode eliminates the separate STT step, cutting ~1–2 s of latency. The
 
 ## Prerequisites
 
-- Python 3.11+
-- Azure CLI (`az`)
-- An Azure subscription with:
-  - Azure OpenAI (gpt-4o-mini and optionally gpt-4o-realtime-preview)
-  - Azure Speech Services (with Avatar enabled)
-- Node.js (for `npx` / SWA CLI during deploy)
+- **Windows** with PowerShell 5.1+ (scripts are `.ps1`)
+- **Python 3.11+** — [python.org](https://www.python.org/downloads/)
+- **Azure CLI** (`az`) — [Install](https://learn.microsoft.com/cli/azure/install-azure-cli)
+- **Node.js 18+** — needed for `npx` / SWA CLI during deploy — [nodejs.org](https://nodejs.org/)
+- An **Azure subscription** with the following services available in your chosen region:
+  - Azure OpenAI (with access to deploy `gpt-4o-mini`)
+  - Azure Speech Services (**with Avatar feature enabled** — currently requires [applying for access](https://aka.ms/csgate))
+  - *(Optional)* A separate Azure OpenAI resource with `gpt-4o-realtime-preview` for low-latency Realtime mode
+
+## Quick Start (Deploy to Azure)
+
+> **Total time:** ~10–15 minutes for a first-time deploy.
+
+### 1. Clone the repo
+
+```powershell
+git clone https://github.com/J2Niklas/haile.git
+cd haile
+```
+
+### 2. Log in to Azure
+
+```powershell
+az login
+az account set --subscription "<your-subscription-id>"
+```
+
+### 3. Deploy everything
+
+```powershell
+.\deploy.ps1
+```
+
+This single script will:
+1. Create a resource group `rg-haile` in `swedencentral`
+2. Deploy all Azure resources via Bicep (OpenAI, Speech, App Service, Static Web App, Storage, App Insights)
+3. Package and zip-deploy the backend to App Service
+4. Deploy the frontend to Azure Static Web Apps
+
+At the end it prints the frontend URL — open it in a browser.
+
+> **To change region or resource group**, edit the `$RESOURCE_GROUP` and `$LOCATION` variables at the top of `deploy.ps1`.
+
+> **To set an access PIN**, pass it as a Bicep parameter:
+> ```powershell
+> # In deploy.ps1, change the az deployment line to:
+> az deployment group create `
+>     --resource-group $RESOURCE_GROUP `
+>     --template-file infrastructure/main.bicep `
+>     --parameters environment=$ENVIRONMENT appPin='your-secret-pin' `
+>     --output none
+> ```
+
+> **To enable Realtime mode**, pass the endpoint of an Azure OpenAI resource that has `gpt-4o-realtime-preview` deployed:
+> ```powershell
+> --parameters environment=$ENVIRONMENT realtimeEndpoint='https://your-openai.openai.azure.com/'
+> ```
 
 ## Local Development
 
@@ -38,6 +89,11 @@ Copy the example settings and fill in your Azure resource details:
 cp backend/local.settings.example.json backend/local.settings.json
 # Edit backend/local.settings.json with your endpoints and credentials
 ```
+
+You'll need values from your deployed Azure resources:
+- `AzureOpenAIEndpoint` — find in Azure Portal → your OpenAI resource → Keys and Endpoint
+- `AzureSpeechEndpoint` — find in Azure Portal → your Speech resource → Keys and Endpoint
+- `AzureSpeechRegion` — the region of your Speech resource (e.g. `swedencentral`)
 
 ### 2. Start the backend
 
@@ -65,7 +121,16 @@ This script:
 1. Creates/updates Azure resources via Bicep
 2. Deploys the backend to App Service (zip deploy with remote build)
 3. Deploys the frontend to Azure Static Web Apps
-4. Grants RBAC roles for managed identity access
+4. Assigns RBAC roles for managed identity access (no keys stored in config)
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Avatar doesn't appear | Speech Avatar feature not enabled | [Apply for access](https://aka.ms/csgate) and wait for approval |
+| "Realtime not available" in console | No `gpt-4o-realtime-preview` deployment | App auto-falls back to SSE mode. To enable, pass `realtimeEndpoint` parameter |
+| CORS errors in browser | Frontend origin not in allowed list | Check the `cors.allowedOrigins` in `main.bicep` or set `CorsOrigins` env var |
+| 401 on API calls | PIN auth enabled but not entered | Enter the PIN in the login screen, or remove `AppPin` to disable auth |
 
 ## Project Structure
 
