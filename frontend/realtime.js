@@ -14,7 +14,8 @@ import {
     chatMessagesEl,
     btnMic,
 } from './dom.js';
-import { stopSpeaking, queueAvatarSentence, getMicStream } from './speech.js';
+import { stopSpeaking, queueAvatarSentence, getMicStream, markResponseStreamComplete } from './speech.js';
+import { getSelectedLanguage } from './language.js';
 
 export async function initRealtimeMode() {
     return new Promise((resolve) => {
@@ -45,6 +46,8 @@ export async function initRealtimeMode() {
                 if (msg.type === 'session_ready') {
                     clearTimeout(timeout);
                     state.realtimeMode = true;
+                    // Send initial language to backend
+                    state.realtimeWs.send(JSON.stringify({ type: 'set_language', language: getSelectedLanguage() }));
                     console.log('Realtime mode: ACTIVE');
                     resolve(true);
                     return;
@@ -78,10 +81,19 @@ function handleRealtimeMessage(msg) {
             if (!state.realtimeResponseActive) {
                 startAssistantBubble();
                 state.realtimeResponseActive = true;
+                state.responseStreamComplete = false;
+                // Mute mic audio for both text- and voice-initiated responses
+                // to prevent the avatar's own speech from triggering barge-in.
+                state.muteRealtimeMic = true;
                 state.pendingRealtimeAssistantBubble = state.currentAssistantBubble;
             }
             if (state.speakingAborted) return;
-            queueAvatarSentence(msg.ssml, msg.text);
+            {
+                const meta = {};
+                if (msg.productId) meta.productId = msg.productId;
+                if (msg.compareIds) meta.compareIds = msg.compareIds;
+                queueAvatarSentence(msg.ssml, msg.text, meta);
+            }
             break;
 
         case 'done':
@@ -90,10 +102,14 @@ function handleRealtimeMessage(msg) {
             }
             state.currentAssistantBubble = null;
             state.realtimeResponseActive = false;
+            markResponseStreamComplete();
             break;
 
         case 'speech_started':
-            if (state.isSpeaking) {
+            // Ignore barge-in when mic is muted — stale audio frames
+            // already in Azure's pipeline can trigger false speech_started
+            // events even after the mic is suppressed on the client.
+            if (state.isSpeaking && !state.muteRealtimeMic) {
                 stopSpeaking();
                 state.realtimeResponseActive = false;
                 if (state.realtimeWs && state.realtimeWs.readyState === WebSocket.OPEN) {
@@ -149,6 +165,10 @@ export async function startRealtimeAudioStream() {
     state.realtimeProcessorNode = state.realtimeAudioContext.createScriptProcessor(2048, 1, 1);
     state.realtimeProcessorNode.onaudioprocess = (e) => {
         if (!state.realtimeWs || state.realtimeWs.readyState !== WebSocket.OPEN) return;
+        // Suppress mic audio while avatar is speaking (or a text-initiated
+        // response is pending) to prevent the avatar's speech from being
+        // picked up and triggering a false barge-in.
+        if (state.isSpeaking || state.muteRealtimeMic) return;
         const float32 = e.inputBuffer.getChannelData(0);
         const pcm16 = new Int16Array(float32.length);
         for (let i = 0; i < float32.length; i++) {

@@ -8,6 +8,7 @@ import { STT_SILENCE_MS, BARGEIN_MIN_WORDS } from './config.js';
 import { state } from './state.js';
 import { chatInput, setListeningBadge, addBubble, btnMic } from './dom.js';
 import { ensureSpeechToken, getMicStream, stopSpeaking } from './speech.js';
+import { getInputLanguage } from './language.js';
 
 async function initSttRecognizer() {
     if (state.sttRecognizer) return;
@@ -22,7 +23,7 @@ async function initSttRecognizer() {
         // (D) Shorter segmentation silence for faster turn-taking
         speechConfig.setProperty('Speech_SegmentationSilenceTimeoutMs', '800');
         speechConfig.setProperty('SpeechServiceConnection_InitialSilenceTimeoutMs', '30000');
-        speechConfig.speechRecognitionLanguage = 'en-US';
+        speechConfig.speechRecognitionLanguage = getInputLanguage();
 
         const stream = await getMicStream();
         const audioConfig = stream
@@ -65,8 +66,27 @@ async function initSttRecognizer() {
             }
         };
 
-        state.sttRecognizer.canceled = () => stopListening();
-        state.sttRecognizer.sessionStopped = () => stopListening();
+        state.sttRecognizer.canceled = (s, e) => {
+            console.warn('STT canceled:', e.errorDetails);
+            // Destroy recognizer so a fresh one is created on next start
+            try { state.sttRecognizer.close(); } catch (_) { /* */ }
+            state.sttRecognizer = null;
+            const wasListening = state.isListening;
+            state.isListening = false;
+            btnMic.classList.remove('listening');
+            setListeningBadge(false);
+            // Auto-restart if user still wants mic on and nothing is playing
+            if (state.micEnabled && wasListening && !state.isSpeaking) {
+                setTimeout(() => {
+                    if (state.micEnabled && !state.isListening && !state.isSpeaking) {
+                        startListening();
+                    }
+                }, 500);
+            }
+        };
+        // Intentional stops already set isListening=false before this fires.
+        // Do NOT call stopListening() here — it races with session restarts.
+        state.sttRecognizer.sessionStopped = () => {};
 
         console.log('STT recognizer initialized');
     } catch (err) {
@@ -84,6 +104,7 @@ export async function startListening() {
         return;
     }
 
+    state.micEnabled = true;
     state.isListening = true;
     btnMic.classList.add('listening');
     chatInput.value = '';
@@ -105,9 +126,19 @@ export async function startListening() {
     }
 }
 
+export function resetSttText() {
+    if (state.sttDebounceTimer) {
+        clearTimeout(state.sttDebounceTimer);
+        state.sttDebounceTimer = null;
+    }
+    state.finalizedText = '';
+    chatInput.value = '';
+}
+
 export function stopListening() {
     if (!state.isListening) return;
     state.isListening = false;
+    state.micEnabled = false;
     btnMic.classList.remove('listening');
     chatInput.placeholder = 'Type a message...';
     setListeningBadge(false);

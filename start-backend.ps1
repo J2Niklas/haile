@@ -8,7 +8,7 @@ if (Test-Path ".\.venv\Scripts\Activate.ps1") {
     Write-Host "Activating virtual environment..." -ForegroundColor Yellow
     .\.venv\Scripts\Activate.ps1
 } else {
-    Write-Host "No .venv found — creating one..." -ForegroundColor Yellow
+    Write-Host "No .venv found - creating one..." -ForegroundColor Yellow
     python -m venv .venv
     .\.venv\Scripts\Activate.ps1
     pip install -r requirements.txt

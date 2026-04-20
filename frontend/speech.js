@@ -14,25 +14,46 @@ import {
     appendToAssistantBubble,
     authHeaders,
 } from './dom.js';
+import { getSelectedLanguage, SUPPORTED_LANGUAGES } from './language.js';
+
+// ── Voice map (per language) ──
+
+const VOICE_MAP = {
+    'en-US': 'en-US-EmmaMultilingualNeural',
+    'da-DK': 'da-DK-ChristelNeural',
+    'de-DE': 'de-DE-SeraphinaMultilingualNeural',
+    'fr-FR': 'fr-FR-VivienneMultilingualNeural',
+    'es-ES': 'es-ES-ElviraNeural',
+    'it-IT': 'it-IT-ElsaNeural',
+    'pt-PT': 'pt-PT-RaquelNeural',
+    'nl-NL': 'nl-NL-ColetteNeural',
+    'sv-SE': 'sv-SE-SofieNeural',
+    'nb-NO': 'nb-NO-PernilleNeural',
+};
+
+function getVoice() {
+    return VOICE_MAP[getSelectedLanguage()] || VOICE_MAP['en-US'];
+}
 
 // ── Filler phrases (A) ──
 
-const FILLER_SSML_POOL = [
-    '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="en-US-AndrewMultilingualNeural"><prosody rate="+20%">Hmm,</prosody></voice></speak>',
-    '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="en-US-AndrewMultilingualNeural"><prosody rate="+20%">Well,</prosody></voice></speak>',
-    '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="en-US-AndrewMultilingualNeural"><prosody rate="+20%">So,</prosody></voice></speak>',
-    '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="en-US-AndrewMultilingualNeural"><prosody rate="+20%">Right,</prosody></voice></speak>',
-];
+function buildFillerSsml(word) {
+    const lang = getSelectedLanguage();
+    const voice = getVoice();
+    return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}"><voice name="${voice}"><prosody rate="+30%">${word}</prosody></voice></speak>`;
+}
+
+const FILLER_WORDS = ['Hmm,', 'Well,', 'So,', 'Right,'];
 let lastFillerIdx = -1;
 
 export function queueFillerPhrase() {
     if (!state.avatarReady || !state.avatarSynthesizer) return;
     let idx;
     do {
-        idx = Math.floor(Math.random() * FILLER_SSML_POOL.length);
-    } while (idx === lastFillerIdx && FILLER_SSML_POOL.length > 1);
+        idx = Math.floor(Math.random() * FILLER_WORDS.length);
+    } while (idx === lastFillerIdx && FILLER_WORDS.length > 1);
     lastFillerIdx = idx;
-    queueAvatarSentence(FILLER_SSML_POOL[idx]);
+    queueAvatarSentence(buildFillerSsml(FILLER_WORDS[idx]));
 }
 
 // ── Speech token ──
@@ -114,7 +135,7 @@ async function _connectAvatar() {
             state.speechToken.region,
         );
         const videoFormat = new SpeechSDK.AvatarVideoFormat('H264', 2000000, 1920, 1080);
-        const avatarConfig = new SpeechSDK.AvatarConfig('harry', 'casual', videoFormat);
+        const avatarConfig = new SpeechSDK.AvatarConfig('meg', 'business', videoFormat);
         avatarConfig.customized = false;
         avatarConfig.backgroundColor = '#FFFFFFFF';
 
@@ -151,6 +172,10 @@ async function _connectAvatar() {
             if (event.track.kind === 'video') {
                 state.avatarVideoStream = event.streams[0];
                 avatarVideo.srcObject = state.avatarVideoStream;
+                // Permanently mute the video element — audio output comes
+                // exclusively from the dedicated <audio> element to avoid
+                // dual-playback interference and mute/unmute clipping.
+                avatarVideo.muted = true;
                 avatarVideo.classList.remove('hidden');
                 avatarPlaceholder.classList.add('hidden');
                 if (state.avatarVideoReadyResolve) {
@@ -224,55 +249,44 @@ async function _connectAvatar() {
 
 // ── Audio management ──
 
-function _reattachAvatarAudio() {
-    if (state.peerConnection) {
-        state.peerConnection.getReceivers().forEach((r) => {
-            if (r.track && r.track.kind === 'audio') r.track.enabled = true;
-        });
-    }
+// Ensure the <audio> element has a srcObject and is playing.
+// Called once per response. The element is never muted — the WebRTC
+// stream is silent when idle so there's nothing to hear.
+function _ensureAudioReady() {
     const avatarAudio = document.getElementById('avatar-audio');
     if (avatarAudio) {
-        avatarAudio.muted = false;
-        if (state.peerConnection) {
+        if (!avatarAudio.srcObject && state.peerConnection) {
             const audioReceiver = state.peerConnection
                 .getReceivers()
                 .find((r) => r.track?.kind === 'audio');
             if (audioReceiver) {
                 avatarAudio.srcObject = new MediaStream([audioReceiver.track]);
-                avatarAudio.play().catch((e) => console.warn('Audio play blocked:', e));
             }
         }
+        avatarAudio.play().catch((e) => console.warn('Audio play blocked:', e));
     }
-    avatarVideo.muted = false;
 }
 
-function _muteAllAudio() {
-    const avatarAudio = document.getElementById('avatar-audio');
-    if (avatarAudio) {
-        avatarAudio.pause();
-        avatarAudio.muted = true;
-        avatarAudio.srcObject = null;
-    }
-    avatarVideo.muted = true;
-    if (state.peerConnection) {
-        state.peerConnection.getReceivers().forEach((r) => {
-            if (r.track?.kind === 'audio') r.track.enabled = false;
-        });
-    }
-}
+// Promise that resolves when a pending stopSpeakingAsync() completes.
+// speakSsmlAsync must NEVER be called while a stop is in flight — the SDK
+// will immediately cancel the new synthesis, causing all queued phrases to
+// burn through with ResultReason.Canceled and nothing actually spoken.
+let _stopPromise = Promise.resolve();
 
 export function stopSpeaking() {
     state.speakingAborted = true;
     state.speechGeneration++;
     state.audioAttachedForResponse = false;
+    state.responseStreamComplete = false;
     state.deferredTextQueue = [];
-    _muteAllAudio();
+    _speechQueue = [];
 
     if (state.avatarSynthesizer && state.avatarReady) {
-        state.avatarSynthesizer.stopSpeakingAsync(
-            () => {},
-            () => {},
-        );
+        _stopPromise = new Promise((resolve) => {
+            state.avatarSynthesizer.stopSpeakingAsync(resolve, resolve);
+            // Safety: resolve after 500ms even if the SDK never calls back
+            setTimeout(resolve, 500);
+        });
     }
     state.pendingSpeechCount = 0;
 
@@ -291,57 +305,128 @@ export function stopSpeaking() {
 
 // ── Avatar TTS queue ──
 
-export function queueAvatarSentence(ssml, deferredText) {
-    if (!ssml) return;
+// Phrases are dispatched to the SDK immediately via speakSsmlAsync.
+// The SDK queues them internally and plays back-to-back with no gap.
+// We only hold phrases in _speechQueue while a stopSpeakingAsync is
+// in flight (to avoid the SDK cancelling them).
+let _speechQueue = [];
 
-    if (state.avatarReady && state.avatarSynthesizer && state.speechToken?.iceServers) {
-        if (!state.audioAttachedForResponse) {
-            _reattachAvatarAudio();
-            state.audioAttachedForResponse = true;
+function _tryFinalComplete() {
+    if (state.pendingSpeechCount <= 0 && _speechQueue.length === 0 && state.responseStreamComplete) {
+        state.pendingSpeechCount = 0;
+        state.isSpeaking = false;
+        setSpeakingIndicator(false);
+        state.audioAttachedForResponse = false;
+        state.onSpeakComplete();
+    }
+}
+
+/**
+ * Flush all pending phrases to the SDK. The Avatar SDK queues
+ * multiple speakSsmlAsync calls internally, playing them
+ * sequentially with no inter-phrase gap.
+ */
+function _drainSpeechQueue() {
+    if (_speechQueue.length === 0) return;
+
+    // Wait for any in-flight stopSpeakingAsync before dispatching.
+    _stopPromise.then(() => {
+        while (_speechQueue.length > 0) {
+            const item = _speechQueue.shift();
+            if (item.gen !== state.speechGeneration) continue;
+            _speakSinglePhrase(item);
         }
-        state.isSpeaking = true;
-        setSpeakingIndicator(true);
-        state.pendingSpeechCount++;
-        const gen = state.speechGeneration;
+    });
+}
 
-        if (deferredText) {
-            appendToAssistantBubble(deferredText);
-        }
+function _speakSinglePhrase({ ssml, gen, _retryCount = 0 }) {
+    state.pendingSpeechCount++;
+    state.isSpeaking = true;
+    setSpeakingIndicator(true);
 
+    let callbackFired = false;
+    const safetyTimer = setTimeout(() => {
+        if (callbackFired) return;
+        callbackFired = true;
+        if (gen !== state.speechGeneration) return;
+        console.warn('Avatar TTS: speakSsmlAsync timed out after 15s — skipping phrase');
+        state.pendingSpeechCount--;
+        _tryFinalComplete();
+    }, 15000);
+
+    try {
         state.avatarSynthesizer.speakSsmlAsync(
             ssml,
             (result) => {
+                if (callbackFired) return;
+                callbackFired = true;
+                clearTimeout(safetyTimer);
                 if (gen !== state.speechGeneration) return;
                 state.pendingSpeechCount--;
                 if (result.reason === SpeechSDK.ResultReason.Canceled) {
-                    console.warn('Avatar TTS phrase canceled');
+                    console.warn('Avatar TTS phrase canceled, retry:', _retryCount);
+                    if (_retryCount < 1) {
+                        _speechQueue.push({ ssml, gen, _retryCount: _retryCount + 1 });
+                        _drainSpeechQueue();
+                    }
                 }
-                if (state.pendingSpeechCount <= 0) {
-                    state.pendingSpeechCount = 0;
-                    state.isSpeaking = false;
-                    setSpeakingIndicator(false);
-                    state.audioAttachedForResponse = false;
-                    state.onSpeakComplete();
-                }
+                _tryFinalComplete();
             },
             (err) => {
+                if (callbackFired) return;
+                callbackFired = true;
+                clearTimeout(safetyTimer);
                 if (gen !== state.speechGeneration) return;
                 console.warn('Avatar speakSsml error:', err);
                 state.pendingSpeechCount--;
-                if (state.pendingSpeechCount <= 0) {
-                    state.pendingSpeechCount = 0;
-                    state.isSpeaking = false;
-                    setSpeakingIndicator(false);
-                    state.audioAttachedForResponse = false;
-                    state.onSpeakComplete();
-                }
+                _tryFinalComplete();
             },
         );
+    } catch (e) {
+        if (callbackFired) return;
+        callbackFired = true;
+        clearTimeout(safetyTimer);
+        console.warn('Avatar speakSsmlAsync threw:', e);
+        state.pendingSpeechCount--;
+        _tryFinalComplete();
+    }
+}
+
+/**
+ * Signal that the response stream (SSE or Realtime) has finished sending
+ * phrases. The TTS queue may still be draining; onSpeakComplete will fire
+ * only after both the queue is empty AND this has been called.
+ */
+export function markResponseStreamComplete() {
+    state.responseStreamComplete = true;
+    _tryFinalComplete();
+}
+
+export function queueAvatarSentence(ssml, deferredText, meta) {
+    if (!ssml) return;
+
+    // Always append text to the bubble immediately so it lands in the
+    // current assistant bubble before the stream finishes and clears it.
+    if (deferredText || (meta && (meta.productId || meta.compareIds))) {
+        appendToAssistantBubble(deferredText || '', meta);
+    }
+
+    if (state.avatarReady && state.avatarSynthesizer && state.speechToken?.iceServers) {
+        const gen = state.speechGeneration;
+        state.isSpeaking = true;
+        setSpeakingIndicator(true);
+
+        if (!state.audioAttachedForResponse) {
+            _ensureAudioReady();
+            state.audioAttachedForResponse = true;
+        }
+
+        _speechQueue.push({ ssml, gen });
+        _drainSpeechQueue();
         return;
     }
 
     // Fallback: audio-only TTS
-    if (deferredText) appendToAssistantBubble(deferredText);
     _speakAudioOnly(ssml);
 }
 
@@ -413,5 +498,7 @@ function _fallbackSpeak(ssml) {
 // ── SSML builder ──
 
 export function buildSsml(text) {
-    return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="en-US-AndrewMultilingualNeural"><prosody rate="+10%">${text}</prosody></voice></speak>`;
+    const lang = getSelectedLanguage();
+    const voice = getVoice();
+    return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}"><voice name="${voice}"><prosody rate="+10%">${text}</prosody></voice></speak>`;
 }

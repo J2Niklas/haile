@@ -4,7 +4,7 @@
  * Wires modules together, handles boot sequence and event bindings.
  */
 
-import { GREETING_TEXT } from './config.js';
+import { GREETING_TEXT, GREETINGS } from './config.js';
 import { state } from './state.js';
 import {
     avatarPlaceholder,
@@ -24,8 +24,9 @@ import {
     stopSpeaking,
     queueAvatarSentence,
     buildSsml,
+    markResponseStreamComplete,
 } from './speech.js';
-import { startListening, stopListening } from './stt.js';
+import { startListening, stopListening, resetSttText } from './stt.js';
 import {
     initRealtimeMode,
     startRealtimeAudioStream,
@@ -33,19 +34,22 @@ import {
 } from './realtime.js';
 import { sendMessage } from './chat.js';
 import { initAuthGate } from './auth.js';
+import { initLanguageToggle, showLanguageToggle, getSelectedLanguage } from './language.js';
 
 // ── Wire cross-module callbacks ──
 
 state.onSendMessage = sendMessage;
 state.onStopListening = stopListening;
+state.onResetSttText = resetSttText;
 state.onSpeakComplete = () => {
+    state.muteRealtimeMic = false;
     if (state.realtimeMode) {
         if (!state.realtimeAudioContext || state.realtimeAudioContext.state === 'closed') {
             startRealtimeAudioStream();
         }
         setListeningBadge(true);
     } else {
-        if (!state.isListening) startListening();
+        if (state.micEnabled && !state.isListening) startListening();
     }
 };
 
@@ -53,17 +57,20 @@ state.onSpeakComplete = () => {
 
 initAuthGate();
 
+// ── Language toggle ──
+
+initLanguageToggle();
+showLanguageToggle();
+
 // ── Input events ──
 
 chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-        if (state.isListening) stopListening();
         sendMessage();
     }
 });
 
 btnSend.addEventListener('click', () => {
-    if (state.isListening) stopListening();
     sendMessage();
 });
 
@@ -75,8 +82,11 @@ btnMic.addEventListener('click', () => {
             startRealtimeAudioStream();
         }
     } else {
-        if (state.isListening) stopListening();
-        else startListening();
+        if (state.isListening) {
+            stopListening();            // stopListening now also sets micEnabled = false
+        } else {
+            startListening();           // startListening sets micEnabled = true
+        }
     }
 });
 
@@ -88,15 +98,19 @@ const screenMain = document.getElementById('screen-main');
 function showScreen(screenId) {
     [screenSleep, screenMain].forEach((s) => s.classList.remove('active'));
     document.getElementById(screenId).classList.add('active');
+    showLanguageToggle();
 }
 
 // ── Greeting ──
 
 async function triggerGreeting() {
+    const lang = getSelectedLanguage();
+    const greeting = GREETINGS[lang] || GREETING_TEXT;
     startAssistantBubble();
     state.audioAttachedForResponse = false;
-    queueAvatarSentence(buildSsml(GREETING_TEXT), GREETING_TEXT);
-    state.conversationMessages.push({ role: 'assistant', content: GREETING_TEXT });
+    queueAvatarSentence(buildSsml(greeting), greeting);
+    markResponseStreamComplete();
+    state.conversationMessages.push({ role: 'assistant', content: greeting });
     state.currentAssistantBubble = null;
 }
 
@@ -106,6 +120,7 @@ document.getElementById('btn-back').addEventListener('click', resetAndGoBack);
 
 async function resetAndGoBack() {
     stopSpeaking();
+    state.micEnabled = false;
 
     stopRealtimeAudioStream();
     if (state.realtimeWs) {
@@ -243,6 +258,7 @@ btnWake.addEventListener('click', async () => {
         }
     } else {
         console.log('HAILE: SSE mode (Realtime API unavailable)');
+        state.micEnabled = true;  // auto-enable mic on boot
         if (!state.isSpeaking && state.pendingSpeechCount === 0) {
             startListening();
         }

@@ -9,6 +9,10 @@ export const state = {
     // Auth
     authToken: sessionStorage.getItem('haile-auth-token') || '',
 
+    // Language
+    selectedLanguage: 'en-US',
+    inputLanguage: 'en-US',   // STT recognition language (set on sleep screen only)
+
     // Speech token
     speechToken: null,
     speechTokenAcquiredAt: 0,
@@ -25,6 +29,7 @@ export const state = {
     // STT
     sttRecognizer: null,
     isListening: false,
+    micEnabled: false,       // true while user wants the mic on (survives session restarts)
     sttAudioStream: null,
     finalizedText: '',
     sttDebounceTimer: null,
@@ -36,8 +41,11 @@ export const state = {
     pendingSpeechCount: 0,
     speechGeneration: 0,
     audioAttachedForResponse: false,
+    responseStreamComplete: false,
+    muteRealtimeMic: false,
 
     // Chat
+    isSending: false,
     conversationMessages: [],
     currentAssistantBubble: null,
     currentAssistantText: '',
@@ -56,4 +64,5 @@ export const state = {
     onSpeakComplete: () => {},
     onSendMessage: () => {},
     onStopListening: () => {},
+    onResetSttText: () => {},
 };

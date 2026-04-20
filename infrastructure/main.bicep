@@ -8,6 +8,7 @@ param baseName string = 'haile'
 @allowed([
   'dev'
   'prod'
+  'dallas'
 ])
 param environment string = 'dev'
 
@@ -15,11 +16,17 @@ param environment string = 'dev'
 @secure()
 param appPin string = ''
 
+@description('Location for Static Web App (not available in all regions)')
+param swaLocation string = 'westeurope'
+
 @description('Azure OpenAI endpoint for Realtime API (leave empty to skip realtime mode)')
 param realtimeEndpoint string = ''
 
 @description('Realtime API model deployment name')
 param realtimeDeployment string = 'gpt-4o-realtime-preview'
+
+@description('App Service Plan SKU name (e.g. B1, S1, P1v2)')
+param appServiceSkuName string = 'B1'
 
 // ==================== NAMING ====================
 
@@ -114,7 +121,7 @@ resource speechAccount 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
 
 resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
   name: staticWebAppName
-  location: 'westeurope'  // SWA not available in all regions
+  location: swaLocation
   sku: {
     name: 'Free'
     tier: 'Free'
@@ -129,8 +136,7 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' = {
   location: location
   kind: 'linux'
   sku: {
-    name: 'B1'
-    tier: 'Basic'
+    name: appServiceSkuName
   }
   properties: {
     reserved: true // required for Linux
@@ -146,6 +152,7 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
   }
   properties: {
     serverFarmId: appServicePlan.id
+    publicNetworkAccess: 'Enabled'
     siteConfig: {
       appSettings: [
         {
